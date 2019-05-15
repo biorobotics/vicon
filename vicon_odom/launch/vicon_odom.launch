@@ -1,7 +1,7 @@
 <launch>
   <arg name="model"/>
   <arg name="child_frame_id" default="$(arg model)/base_link"/>
-  <arg name="publish_tf" default="false"/>
+  <arg name="publish_tf" default="true"/>
   <arg name="vicon_fps" default="100"/>
   <arg name="output" default="screen"/>
 
@@ -14,4 +14,8 @@
     <remap from="~vicon_subject" to="$(arg model)"/>
     <remap from="~odom" to="/$(arg model)/odom"/>
   </node>
+
+  <node pkg="tf" type="static_transform_publisher" name="base_vicon" args="-0.2 -0.3 0 0 0 0 /base /vicon 100"/> 
+  <node pkg="tf" type="static_transform_publisher" name="Tool_correction" args="0 0 0 0 1.5707963268 0 /Tool /Tool_corrected 100"/> 
+
 </launch>
