@@ -65,7 +65,7 @@ bool ViconDriver::init(std::string host)
 
   std::cout << "Connected" << std::endl;
 
-  client_->SetStreamMode(ViconSDK::StreamMode::ClientPull);
+  client_->SetStreamMode(ViconSDK::StreamMode::ServerPush);
   client_->SetAxisMapping(ViconSDK::Direction::Forward,
                           ViconSDK::Direction::Left, ViconSDK::Direction::Up);
   return true;
@@ -260,73 +260,142 @@ void ViconDriver::processSubjects(int64_t frame_time_usec,
     }
     else
     {
-      if(n_segments > 1)
-      {
-        if(count % 100 == 0)
-          std::cout << "Multiple segments for subject " << subject_name
-                    << ", only publishing pose for first segment" << std::endl;
+      for(int i = 0; i < n_segments; i ++){
+        ViconDriver::Subject subject;
+
+        segment_name = client_->GetSegmentName(subject_name, i).SegmentName;
+
+        ViconSDK::Output_GetSegmentGlobalTranslation trans =
+            client_->GetSegmentGlobalTranslation(subject_name, segment_name);
+        ViconSDK::Output_GetSegmentGlobalRotationQuaternion quat =
+            client_->GetSegmentGlobalRotationQuaternion(subject_name,
+                                                        segment_name);
+
+        subject.time_usec = frame_time_usec;
+        subject.frame_number = frame_number;
+        subject.name = segment_name; // So that we know which segment is which
+
+        if(trans.Result == ViconSDK::Result::Success &&
+          quat.Result == ViconSDK::Result::Success && !trans.Occluded &&
+          !quat.Occluded)
+        {
+          subject.occluded = false;
+          subject.translation[0] = trans.Translation[0] / 1000.0;
+          subject.translation[1] = trans.Translation[1] / 1000.0;
+          subject.translation[2] = trans.Translation[2] / 1000.0;
+          subject.rotation[0] = quat.Rotation[0];
+          subject.rotation[1] = quat.Rotation[1];
+          subject.rotation[2] = quat.Rotation[2];
+          subject.rotation[3] = quat.Rotation[3];
+        }
+        else
+        {
+          subject.occluded = true;
+          subject.translation[0] = 0;
+          subject.translation[1] = 0;
+          subject.translation[2] = 0;
+          subject.rotation[0] = 0;
+          subject.rotation[1] = 0;
+          subject.rotation[2] = 0;
+          subject.rotation[3] = 1;
+        }
+
+        unsigned int n_subject_markers =
+            client_->GetMarkerCount(subject_name).MarkerCount;
+        for(unsigned int i_markers = 0; i_markers < n_subject_markers;
+            i_markers++)
+        {
+          Marker marker;
+          marker.name =
+              client_->GetMarkerName(subject_name, i_markers).MarkerName;
+          marker.subject_name = subject_name;
+
+          ViconSDK::Output_GetMarkerGlobalTranslation translation =
+              client_->GetMarkerGlobalTranslation(subject_name, marker.name);
+          marker.translation[0] = translation.Translation[0] / 1000.0;
+          marker.translation[1] = translation.Translation[1] / 1000.0;
+          marker.translation[2] = translation.Translation[2] / 1000.0;
+          marker.occluded = translation.Occluded;
+
+          subject.markers.push_back(marker);
+        }
+
+        if(subject_callback_ != NULL)
+          subject_callback_(subject);
       }
 
-      ViconDriver::Subject subject;
 
-      segment_name = client_->GetSegmentName(subject_name, 0).SegmentName;
+      //
+      // Original code that only publish one segment
+      //
+      //
+      // if(n_segments > 1)
+      // {
+      //   if(count % 100 == 0)
+      //     std::cout << "Multiple segments for subject " << subject_name
+      //               << ", only publishing pose for first segment" << std::endl;
+      // }
 
-      ViconSDK::Output_GetSegmentGlobalTranslation trans =
-          client_->GetSegmentGlobalTranslation(subject_name, segment_name);
-      ViconSDK::Output_GetSegmentGlobalRotationQuaternion quat =
-          client_->GetSegmentGlobalRotationQuaternion(subject_name,
-                                                      segment_name);
+      // ViconDriver::Subject subject;
 
-      subject.time_usec = frame_time_usec;
-      subject.frame_number = frame_number;
-      subject.name = subject_name;
+      // segment_name = client_->GetSegmentName(subject_name, 0).SegmentName;
 
-      if(trans.Result == ViconSDK::Result::Success &&
-         quat.Result == ViconSDK::Result::Success && !trans.Occluded &&
-         !quat.Occluded)
-      {
-        subject.occluded = false;
-        subject.translation[0] = trans.Translation[0] / 1000.0;
-        subject.translation[1] = trans.Translation[1] / 1000.0;
-        subject.translation[2] = trans.Translation[2] / 1000.0;
-        subject.rotation[0] = quat.Rotation[0];
-        subject.rotation[1] = quat.Rotation[1];
-        subject.rotation[2] = quat.Rotation[2];
-        subject.rotation[3] = quat.Rotation[3];
-      }
-      else
-      {
-        subject.occluded = true;
-        subject.translation[0] = 0;
-        subject.translation[1] = 0;
-        subject.translation[2] = 0;
-        subject.rotation[0] = 0;
-        subject.rotation[1] = 0;
-        subject.rotation[2] = 0;
-        subject.rotation[3] = 1;
-      }
+      // ViconSDK::Output_GetSegmentGlobalTranslation trans =
+      //     client_->GetSegmentGlobalTranslation(subject_name, segment_name);
+      // ViconSDK::Output_GetSegmentGlobalRotationQuaternion quat =
+      //     client_->GetSegmentGlobalRotationQuaternion(subject_name,
+      //                                                 segment_name);
 
-      unsigned int n_subject_markers =
-          client_->GetMarkerCount(subject_name).MarkerCount;
-      for(unsigned int i_markers = 0; i_markers < n_subject_markers;
-          i_markers++)
-      {
-        Marker marker;
-        marker.name =
-            client_->GetMarkerName(subject_name, i_markers).MarkerName;
-        marker.subject_name = subject_name;
+      // subject.time_usec = frame_time_usec;
+      // subject.frame_number = frame_number;
+      // subject.name = subject_name;
 
-        ViconSDK::Output_GetMarkerGlobalTranslation translation =
-            client_->GetMarkerGlobalTranslation(subject_name, marker.name);
-        marker.translation[0] = translation.Translation[0] / 1000.0;
-        marker.translation[1] = translation.Translation[1] / 1000.0;
-        marker.translation[2] = translation.Translation[2] / 1000.0;
-        marker.occluded = translation.Occluded;
+      // if(trans.Result == ViconSDK::Result::Success &&
+      //    quat.Result == ViconSDK::Result::Success && !trans.Occluded &&
+      //    !quat.Occluded)
+      // {
+      //   subject.occluded = false;
+      //   subject.translation[0] = trans.Translation[0] / 1000.0;
+      //   subject.translation[1] = trans.Translation[1] / 1000.0;
+      //   subject.translation[2] = trans.Translation[2] / 1000.0;
+      //   subject.rotation[0] = quat.Rotation[0];
+      //   subject.rotation[1] = quat.Rotation[1];
+      //   subject.rotation[2] = quat.Rotation[2];
+      //   subject.rotation[3] = quat.Rotation[3];
+      // }
+      // else
+      // {
+      //   subject.occluded = true;
+      //   subject.translation[0] = 0;
+      //   subject.translation[1] = 0;
+      //   subject.translation[2] = 0;
+      //   subject.rotation[0] = 0;
+      //   subject.rotation[1] = 0;
+      //   subject.rotation[2] = 0;
+      //   subject.rotation[3] = 1;
+      // }
 
-        subject.markers.push_back(marker);
-      }
-      if(subject_callback_ != NULL)
-        subject_callback_(subject);
+      // unsigned int n_subject_markers =
+      //     client_->GetMarkerCount(subject_name).MarkerCount;
+      // for(unsigned int i_markers = 0; i_markers < n_subject_markers;
+      //     i_markers++)
+      // {
+      //   Marker marker;
+      //   marker.name =
+      //       client_->GetMarkerName(subject_name, i_markers).MarkerName;
+      //   marker.subject_name = subject_name;
+
+      //   ViconSDK::Output_GetMarkerGlobalTranslation translation =
+      //       client_->GetMarkerGlobalTranslation(subject_name, marker.name);
+      //   marker.translation[0] = translation.Translation[0] / 1000.0;
+      //   marker.translation[1] = translation.Translation[1] / 1000.0;
+      //   marker.translation[2] = translation.Translation[2] / 1000.0;
+      //   marker.occluded = translation.Occluded;
+
+      //   subject.markers.push_back(marker);
+      // }
+      // if(subject_callback_ != NULL)
+      //   subject_callback_(subject);
     }
   }
 }

@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 2.8.3)
 project(vicon)
 
 find_package(catkin REQUIRED COMPONENTS roscpp geometry_msgs nav_msgs std_srvs
-  message_generation cmake_modules vicon_driver)
+  message_generation cmake_modules vicon_driver tf)
 find_package(Eigen REQUIRED)
 find_package(Boost REQUIRED COMPONENTS thread)
 

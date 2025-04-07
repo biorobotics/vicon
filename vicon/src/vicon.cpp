@@ -1,4 +1,8 @@
 #include <ros/ros.h>
+#include <tf/transform_broadcaster.h>
+#include <geometry_msgs/PointStamped.h>
+#include <geometry_msgs/Transform.h>
+#include <geometry_msgs/TransformStamped.h>
 #include <pthread.h>
 #include <map>
 #include <set>
@@ -8,6 +12,7 @@
 #include "vicon/Subject.h"
 #include "vicon/Markers.h"
 #include "vicon/SetPose.h"
+#include "std_msgs/Time.h"
 
 using vicon_driver::ViconDriver;
 
@@ -20,6 +25,17 @@ static std::map<
     const std::string, Eigen::Affine3d, std::less<const std::string>,
     Eigen::aligned_allocator<std::pair<const std::string, Eigen::Affine3d> > >
     calib_pose;
+static tf::TransformBroadcaster *br;
+static std::string marker_pub_name = "sheet_metal_one_set_origin_ marker";
+static std::string custom_tf_pub_name = "custom_tf";
+static ros::Publisher origin_marker_pub;
+static ros::Publisher custom_transform_pub;
+static ros::Subscriber master_time_sub;
+static ros::Time master_time;
+static ros::Duration delay;
+static uint32_t sequenceCounterBase = 0;
+static uint32_t sequenceCounterUpper = 0;
+
 
 static void *loadCalibThread(void *arg)
 {
@@ -149,6 +165,48 @@ static void subject_publish_callback(const ViconDriver::Subject &subject)
       subject_ros.markers[i].occluded = subject.markers[i].occluded;
     }
     it->second.publish(subject_ros);
+
+
+
+    geometry_msgs::TransformStamped stampTransform;
+    stampTransform.transform.translation.x = position.x();
+    stampTransform.transform.translation.y = position.y();
+    stampTransform.transform.translation.z = position.z();
+
+    stampTransform.transform.rotation.x = rotation.x();
+    stampTransform.transform.rotation.y = rotation.y();
+    stampTransform.transform.rotation.z = rotation.z();
+    stampTransform.transform.rotation.w = rotation.w();
+
+    stampTransform.child_frame_id = subject.name;
+    stampTransform.header.stamp = ros::Time::now() + delay;
+    stampTransform.header.frame_id = "vicon_base";
+
+    // std::cout<<subject.name<<std::endl;
+    if (subject.name == "upper") {
+      stampTransform.header.seq = sequenceCounterUpper;
+      sequenceCounterUpper++;
+      // std::cout<<"added to sequence upper"<<std::endl;
+    }
+    else {
+      stampTransform.header.seq = sequenceCounterBase;
+      // std::cout<<"added to sequence base"<<std::endl;
+    }
+    
+    br->sendTransform(stampTransform);
+    custom_transform_pub.publish(stampTransform);
+    std::cout<<"Transform sent "<<subject.name<<std::endl;
+
+    // geometry_msgs::PointStamped origin_marker_msg;
+    // origin_marker_msg.header.seq = subject.frame_number;
+    // origin_marker_msg.header.stamp = ros::Time::now();
+    // origin_marker_msg.header.frame_id = "/vicon_base";
+    // origin_marker_msg.point.x = subject.markers[0].translation[0];
+    // origin_marker_msg.point.y = subject.markers[0].translation[1];
+    // origin_marker_msg.point.z = subject.markers[0].translation[2];
+
+    // origin_marker_pub.publish(origin_marker_msg);
+
   }
 }
 
@@ -184,6 +242,13 @@ static void unlabeled_markers_publish_callback(
   unlabeled_markers_pub.publish(markers_ros);
 }
 
+void master_time_callback(const std_msgs::Time::ConstPtr& msg){
+  master_time = msg->data;
+  delay = master_time - ros::Time::now();
+  std::cout<<delay<<std::endl;
+  //std::cout<<"Time stamp received"<<std::endl;
+}
+
 int main(int argc, char **argv)
 {
   ros::init(argc, argv, "vicon");
@@ -199,6 +264,11 @@ int main(int argc, char **argv)
 
   ros::ServiceServer set_zero_pose_srv =
       nh->advertiseService("set_zero_pose", &saveCalib);
+
+  br = new tf::TransformBroadcaster();
+  master_time_sub = nh->subscribe("master_time",1,master_time_callback);
+  // origin_marker_pub =  nh->advertise<geometry_msgs::PointStamped>(marker_pub_name,1);
+  custom_transform_pub = nh->advertise<geometry_msgs::TransformStamped>(custom_tf_pub_name,1);
 
   ViconDriver vd;
   if(!vd.init(vicon_server))
